@@ -25,15 +25,21 @@ import org.apache.spark.util.Utils
  */
 private[spark] case object TriggerThreadDump
 
+case object RecreateClassLoader
+
 /**
  * [[RpcEndpoint]] that runs inside of executors to enable driver -> executor RPC.
  */
 private[spark]
-class ExecutorEndpoint(override val rpcEnv: RpcEnv, executorId: String) extends RpcEndpoint {
+class ExecutorEndpoint(override val rpcEnv: RpcEnv, executorId: String, executor: Executor) extends RpcEndpoint {
 
   override def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] = {
     case TriggerThreadDump =>
       context.reply(Utils.getThreadDump())
+
+    case RecreateClassLoader =>
+      executor.refreshCl
+      context.reply(s"executor ${executorId} has recreated classloader")
   }
 
 }

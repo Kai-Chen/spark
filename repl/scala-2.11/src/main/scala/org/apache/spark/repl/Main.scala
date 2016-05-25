@@ -31,12 +31,15 @@ object Main extends Logging {
   val tmp = System.getProperty("java.io.tmpdir")
   val rootDir = conf.get("spark.repl.classdir", tmp)
   val outputDir = Utils.createTempDir(rootDir)
+  val dynclDir = conf.get("spark.repl.dyncl.classdir", ".")
   val s = new Settings()
   s.processArguments(List("-Yrepl-class-based",
     "-Yrepl-outdir", s"${outputDir.getAbsolutePath}",
     "-classpath", getAddedJars.mkString(File.pathSeparator)), true)
   // the creation of SecurityManager has to be lazy so SPARK_YARN_MODE is set if needed
   lazy val classServer = new HttpServer(conf, outputDir, new SecurityManager(conf))
+  lazy val dynClassServer = new HttpServer(conf, dynclDir, new SecurityManager(conf))
+
   var sparkContext: SparkContext = _
   var sqlContext: SQLContext = _
   var interp = new SparkILoop // this is a public var because tests reset it.
@@ -46,8 +49,10 @@ object Main extends Logging {
     // Start the classServer and store its URI in a spark system property
     // (which will be passed to executors so that they can connect to it)
     classServer.start()
+    dynClassServer.start()
     interp.process(s) // Repl starts and goes in loop of R.E.P.L
     classServer.stop()
+    dynClassServer.stop()
     Option(sparkContext).map(_.stop)
   }
 
@@ -68,6 +73,7 @@ object Main extends Logging {
       .setMaster(getMaster)
       .setJars(jars)
       .set("spark.repl.class.uri", classServer.uri)
+      .set("spark.repl.dyncl.uri", dynClassServer.uri)
       .setIfMissing("spark.app.name", "Spark shell")
     logInfo("Spark class server started at " + classServer.uri)
     if (execUri != null) {

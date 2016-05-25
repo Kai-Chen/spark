@@ -48,7 +48,7 @@ import org.apache.mesos.MesosNativeLibrary
 import org.apache.spark.annotation.{DeveloperApi, Experimental}
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.deploy.{LocalSparkCluster, SparkHadoopUtil}
-import org.apache.spark.executor.{ExecutorEndpoint, TriggerThreadDump}
+import org.apache.spark.executor.{ExecutorEndpoint, TriggerThreadDump, RecreateClassLoader}
 import org.apache.spark.input.{StreamInputFormat, PortableDataStream, WholeTextFileInputFormat,
   FixedLengthBinaryInputFormat}
 import org.apache.spark.io.CompressionCodec
@@ -204,6 +204,15 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   // log out Spark Version in Spark driver log
   logInfo(s"Running Spark version $SPARK_VERSION")
 
+  // used to tell executors to reset classloader
+  class ExecutorMap extends SparkListener {
+    var executorIds: Set[String] = Set.empty
+    override def onExecutorAdded(executorAdded: SparkListenerExecutorAdded) =
+      executorIds = executorIds + executorAdded.executorId
+    override def onExecutorRemoved(executorRemoved: SparkListenerExecutorRemoved) =
+      executorIds = executorIds - executorRemoved.executorId
+  }
+
   /* ------------------------------------------------------------------------------------- *
    | Private variables. These variables keep the internal state of the context, and are    |
    | not accessible by the outside world. They're mutable since we want to initialize all  |
@@ -230,6 +239,7 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   private var _applicationAttemptId: Option[String] = None
   private var _eventLogger: Option[EventLoggingListener] = None
   private var _executorAllocationManager: Option[ExecutorAllocationManager] = None
+  var _executorMap: Option[ExecutorMap] = None
   private var _cleaner: Option[ContextCleaner] = None
   private var _listenerBusStarted: Boolean = false
   private var _jars: Seq[String] = _
@@ -461,6 +471,10 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
         None
       }
 
+    // TODO: extract constant from config key
+    _executorMap = _conf.getOption("spark.repl.dyncl.uri") map (_ => new ExecutorMap)
+    _executorMap map addSparkListener
+
     _ui =
       if (conf.getBoolean("spark.ui.enabled", true)) {
         Some(SparkUI.createLiveUI(this, _conf, listenerBus, _jobProgressListener,
@@ -622,6 +636,18 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
         logError(s"Exception getting thread dump from executor $executorId", e)
         None
     }
+  }
+
+  def hotdeploy = _executorMap map (_.executorIds foreach redeploy)
+
+  def redeploy (executorId: String) = {
+    logInfo(s"hot deploy on executor ${executorId}")
+    val (host, port) = env.blockManager.master.getRpcHostPortForExecutor(executorId).get
+    val endpointRef = env.rpcEnv.setupEndpointRef(
+      SparkEnv.executorActorSystemName,
+      RpcAddress(host, port),
+      ExecutorEndpoint.EXECUTOR_ENDPOINT_NAME)
+    endpointRef.askWithRetry[String](RecreateClassLoader)
   }
 
   private[spark] def getLocalProperties: Properties = localProperties.get()

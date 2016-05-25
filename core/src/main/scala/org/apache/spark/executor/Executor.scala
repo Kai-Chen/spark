@@ -87,7 +87,7 @@ private[spark] class Executor(
 
   // Create an RpcEndpoint for receiving RPCs from the driver
   private val executorEndpoint = env.rpcEnv.setupEndpoint(
-    ExecutorEndpoint.EXECUTOR_ENDPOINT_NAME, new ExecutorEndpoint(env.rpcEnv, executorId))
+    ExecutorEndpoint.EXECUTOR_ENDPOINT_NAME, new ExecutorEndpoint(env.rpcEnv, executorId, this))
 
   // Whether to load classes in user jars before those in Spark jars
   private val userClassPathFirst = conf.getBoolean("spark.executor.userClassPathFirst", false)
@@ -97,8 +97,15 @@ private[spark] class Executor(
   private val urlClassLoader = createClassLoader()
   private val replClassLoader = addReplClassLoaderIfNeeded(urlClassLoader)
 
+  // load custom class loader if any
+  private var hotdeployClassLoader = createHotdeployClassLoader
+  def createHotdeployClassLoader = addReplClassLoaderIfNeeded(replClassLoader, "spark.repl.dyncl.uri")
+  def refreshCl = {
+    hotdeployClassLoader = createHotdeployClassLoader
+  }
+
   // Set the classloader for serializer
-  env.serializer.setDefaultClassLoader(replClassLoader)
+  env.serializer.setDefaultClassLoader(hotdeployClassLoader)
 
   // Akka's message frame size. If task result is bigger than this, we use the block manager
   // to send the result back.
@@ -181,7 +188,7 @@ private[spark] class Executor(
     override def run(): Unit = {
       val taskMemoryManager = new TaskMemoryManager(env.executorMemoryManager)
       val deserializeStartTime = System.currentTimeMillis()
-      Thread.currentThread.setContextClassLoader(replClassLoader)
+      Thread.currentThread.setContextClassLoader(hotdeployClassLoader)
       val ser = env.closureSerializer.newInstance()
       logInfo(s"Running $taskName (TID $taskId)")
       execBackend.statusUpdate(taskId, TaskState.RUNNING, EMPTY_BYTE_BUFFER)
@@ -357,8 +364,8 @@ private[spark] class Executor(
    * If the REPL is in use, add another ClassLoader that will read
    * new classes defined by the REPL as the user types code
    */
-  private def addReplClassLoaderIfNeeded(parent: ClassLoader): ClassLoader = {
-    val classUri = conf.get("spark.repl.class.uri", null)
+  private def addReplClassLoaderIfNeeded(parent: ClassLoader, uriKey: String = "spark.repl.class.uri"): ClassLoader = {
+    val classUri = conf.get(uriKey, null)
     if (classUri != null) {
       logInfo("Using REPL class URI: " + classUri)
       try {

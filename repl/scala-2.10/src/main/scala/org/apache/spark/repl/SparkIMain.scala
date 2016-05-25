@@ -116,6 +116,10 @@ import org.apache.spark.annotation.DeveloperApi
     /** Jetty server that will serve our classes to worker nodes */
     private val classServerPort                               = conf.getInt("spark.replClassServer.port", 0)
     private val classServer                                   = new HttpServer(conf, outputDir, new SecurityManager(conf), classServerPort, "HTTP class server")
+
+    val dynclDir = conf.get("spark.repl.dyncl.classdir", ".")
+    lazy val dynClassServer = new HttpServer(conf, new java.io.File(dynclDir), new SecurityManager(conf))
+
     private var currentSettings: Settings             = initialSettings
     private var printResults                                  = true      // whether to print result lines
     private var totalSilence                                  = false     // whether to print anything
@@ -128,6 +132,7 @@ import org.apache.spark.annotation.DeveloperApi
     // Start the classServer and store its URI in a spark system property
     // (which will be passed to executors so that they can connect to it)
     classServer.start()
+    dynClassServer.start()
     if (SPARK_DEBUG_REPL) {
       echo("Class server started, URI = " + classServer.uri)
     }
@@ -995,6 +1000,7 @@ import org.apache.spark.annotation.DeveloperApi
   def close() {
     reporter.flush()
     classServer.stop()
+    dynClassServer.stop()
   }
 
   /**

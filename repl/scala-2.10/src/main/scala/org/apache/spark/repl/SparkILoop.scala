@@ -1010,6 +1010,7 @@ class SparkILoop(
       .setMaster(getMaster())
       .setJars(jars)
       .set("spark.repl.class.uri", intp.classServerUri)
+      .set("spark.repl.dyncl.uri", intp.dynClassServer.uri)
       .setIfMissing("spark.app.name", "Spark shell")
     if (execUri != null) {
       conf.set("spark.executor.uri", execUri)
