@@ -638,7 +638,11 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     }
   }
 
-  def hotdeploy = _executorMap map (_.executorIds foreach redeploy)
+  def hotdeploy(): Unit =
+    if (isLocal)
+      (_schedulerBackend.asInstanceOf[LocalBackend]).hotdeploy
+    else
+      _executorMap map (_.executorIds foreach redeploy)
 
   def redeploy (executorId: String) = {
     logInfo(s"hot deploy on executor ${executorId}")

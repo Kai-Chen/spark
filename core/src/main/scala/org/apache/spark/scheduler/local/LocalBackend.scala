@@ -36,6 +36,9 @@ private case class KillTask(taskId: Long, interruptThread: Boolean)
 
 private case class StopExecutor()
 
+/** Message object for hot-deploy in local executor */
+private case object RecreateClassLoader
+
 /**
  * Calls to LocalBackend are all serialized through LocalEndpoint. Using an RpcEndpoint makes the
  * calls on LocalBackend asynchronous, which is necessary to prevent deadlock between LocalBackend
@@ -70,6 +73,9 @@ private[spark] class LocalEndpoint(
 
     case KillTask(taskId, interruptThread) =>
       executor.killTask(taskId, interruptThread)
+
+    case RecreateClassLoader =>
+      executor.refreshCl
   }
 
   override def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] = {
@@ -145,4 +151,5 @@ private[spark] class LocalBackend(
 
   override def applicationId(): String = appId
 
+  def hotdeploy = localEndpoint.send(RecreateClassLoader)
 }
